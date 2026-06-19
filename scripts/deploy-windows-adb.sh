@@ -76,6 +76,10 @@ echo "==> Installing"
 adb.exe install -r "$WIN_APK" | sed '/^\*/d'
 echo "==> Launching $PKG"
 adb.exe shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-adb.exe shell pm list packages | tr -d '\r' | grep -q "$PKG" \
-  && echo "Done — $PKG installed and launched." \
-  || echo "Install reported success but package not listed; check the phone."
+# Capture first (a `... | grep -q` pipeline would trip `set -o pipefail` via the
+# SIGPIPE grep -q sends upstream, giving a false negative even on a match).
+pkgs="$(adb.exe shell pm list packages 2>/dev/null | tr -d '\r' || true)"
+case "$pkgs" in
+  *"$PKG"*) echo "Done — $PKG installed and launched." ;;
+  *)        echo "Install reported success but package not listed; check the phone." ;;
+esac
