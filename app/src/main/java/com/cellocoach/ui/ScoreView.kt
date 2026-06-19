@@ -179,11 +179,33 @@ private fun DrawScope.drawNotes(
         color = statusColor(status).toArgb(); isFakeBoldText = true
     }
 
+    val n = notes.size
+    val shapes = Array(n) { classifyDuration((notes[it].end - notes[it].start) / secPerQuarter) }
+    val stemLen = ls * 3.2f
+
+    // --- beam grouping: maximal runs of consecutive pitched notes that carry a
+    // flag (eighth or shorter) and fall within the same quarter-note beat. ---
+    fun beat(i: Int) = kotlin.math.floor(notes[i].start / secPerQuarter + 1e-6).toInt()
+    fun beamable(i: Int) = !notes[i].isRest && shapes[i].flags >= 1
+    val groupOf = IntArray(n) { -1 }
+    val groups = ArrayList<IntRange>()
+    run {
+        var i = 0
+        while (i < n) {
+            if (beamable(i)) {
+                var j = i
+                while (j + 1 < n && beamable(j + 1) && beat(j + 1) == beat(i)) j++
+                if (j > i) { groups.add(i..j); for (k in i..j) groupOf[k] = groups.size - 1 }
+                i = j + 1
+            } else i++
+        }
+    }
+
+    // --- heads, labels, rests, and stems/flags for UN-beamed notes ---
     notes.forEachIndexed { idx, note ->
         val cx = xForIdx(idx)
         val isCurrent = idx == currentNoteIdx
-        val ql = (note.end - note.start) / secPerQuarter      // length in quarter notes
-        val shape = classifyDuration(ql)
+        val shape = shapes[idx]
         val ink = if (isCurrent) statusColor(status) else Ink
         if (note.isRest) {
             drawRest(cx, top, ls, shape, Faint)
@@ -191,12 +213,41 @@ private fun DrawScope.drawNotes(
         }
         val cy = yForMidi(note.midi)
         drawLedgerLines(cx, cy, top, bottom, ls, Faint)
-        drawNoteGlyph(cx, cy, ink, ls, shape)
+        drawNoteHead(cx, cy, ink, ls, shape.filled, shape.dotted)
+        if (groupOf[idx] < 0 && shape.stem) {
+            drawStem(cx, cy, ls, ink, cy - stemLen)
+            drawFlags(cx, ls, ink, cy - stemLen, shape.flags)
+        }
         drawContext.canvas.nativeCanvas.drawText(
             note.name, cx, bottom + ls * 2.6f, if (isCurrent) labelCurrent else labelPaint,
         )
     }
+
+    // --- beams: stems of each group reach a shared beam line, joined by 1 (eighth)
+    // or 2 (sixteenth) horizontal beams. ---
+    val beamThick = ls * 0.5f
+    val beamGap = ls * 0.62f
+    for (g in groups) {
+        val idxs = g.toList()
+        val beamY = idxs.minOf { yForMidi(notes[it].midi) } - stemLen
+        idxs.forEach { k ->
+            val ink = if (k == currentNoteIdx) statusColor(status) else Ink
+            drawStem(xForIdx(k), yForMidi(notes[k].midi), ls, ink, beamY)
+        }
+        // primary beam across the whole group
+        drawLine(Ink, Offset(stemX(xForIdx(idxs.first()), ls), beamY),
+            Offset(stemX(xForIdx(idxs.last()), ls), beamY), strokeWidth = beamThick)
+        // secondary beam between adjacent sixteenth notes
+        for (a in 0 until idxs.size - 1) {
+            if (shapes[idxs[a]].flags >= 2 && shapes[idxs[a + 1]].flags >= 2) {
+                drawLine(Ink, Offset(stemX(xForIdx(idxs[a]), ls), beamY + beamGap),
+                    Offset(stemX(xForIdx(idxs[a + 1]), ls), beamY + beamGap), strokeWidth = beamThick)
+            }
+        }
+    }
 }
+
+private fun stemX(cx: Float, ls: Float) = cx + (ls * 0.62f) * 0.92f
 
 /** Notehead/stem/flags/dot for one note value. */
 private data class NoteShape(val filled: Boolean, val stem: Boolean, val flags: Int, val dotted: Boolean)
@@ -218,25 +269,28 @@ private fun classifyDuration(ql: Double): NoteShape {
     return templates.minByOrNull { kotlin.math.abs(kotlin.math.ln(q / it.first)) }!!.second
 }
 
-private fun DrawScope.drawNoteGlyph(cx: Float, cy: Float, color: Color, ls: Float, shape: NoteShape) {
+private fun DrawScope.drawNoteHead(cx: Float, cy: Float, color: Color, ls: Float, filled: Boolean, dotted: Boolean) {
     val rx = ls * 0.62f
     val ry = ls * 0.5f
-    if (shape.filled) {
+    if (filled) {
         drawOval(color, topLeft = Offset(cx - rx, cy - ry), size = Size(rx * 2, ry * 2))
     } else {
         drawOval(color, topLeft = Offset(cx - rx, cy - ry), size = Size(rx * 2, ry * 2),
             style = Stroke(width = ls * 0.18f))
     }
-    if (shape.dotted) drawCircle(color, ls * 0.16f, Offset(cx + rx + ls * 0.45f, cy))
-    if (shape.stem) {
-        val stemX = cx + rx * 0.92f
-        val stemTop = cy - ls * 3.2f
-        drawLine(color, Offset(stemX, cy), Offset(stemX, stemTop), strokeWidth = ls * 0.16f)
-        for (k in 0 until shape.flags) {
-            val fy = stemTop + k * ls * 0.7f
-            drawLine(color, Offset(stemX, fy), Offset(stemX + ls * 0.9f, fy + ls * 0.95f),
-                strokeWidth = ls * 0.16f)
-        }
+    if (dotted) drawCircle(color, ls * 0.16f, Offset(cx + rx + ls * 0.45f, cy))
+}
+
+private fun DrawScope.drawStem(cx: Float, cy: Float, ls: Float, color: Color, topY: Float) {
+    drawLine(color, Offset(stemX(cx, ls), cy), Offset(stemX(cx, ls), topY), strokeWidth = ls * 0.16f)
+}
+
+/** Individual flags, used only for un-beamed eighth/sixteenth notes. */
+private fun DrawScope.drawFlags(cx: Float, ls: Float, color: Color, stemTop: Float, flags: Int) {
+    val sx = stemX(cx, ls)
+    for (k in 0 until flags) {
+        val fy = stemTop + k * ls * 0.7f
+        drawLine(color, Offset(sx, fy), Offset(sx + ls * 0.9f, fy + ls * 0.95f), strokeWidth = ls * 0.16f)
     }
 }
 
