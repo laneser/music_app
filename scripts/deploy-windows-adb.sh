@@ -21,6 +21,9 @@ cd "$(dirname "$0")/.."
 
 IMAGE="${IMAGE:-cellocoach-dev:latest}"
 GRADLE_VOL="${GRADLE_VOL:-cellocoach-gradle}"
+# Persist the debug keystore so rebuilds keep the same signature (otherwise
+# adb install -r fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+ANDROID_VOL="${ANDROID_VOL:-cellocoach-android}"
 WIN_APK="${WIN_APK:-C:\\Users\\Public\\cellocoach-debug.apk}"
 # /mnt/c equivalent of WIN_APK, for the copy step.
 WSL_APK="/mnt/c/Users/Public/cellocoach-debug.apk"
@@ -45,6 +48,7 @@ if [ "${SKIP_BUILD:-0}" != "1" ] || [ ! -f "$APK" ]; then
   docker run --rm \
     -v "$PWD":/workspace -w /workspace \
     -v "$GRADLE_VOL":/root/.gradle \
+    -v "$ANDROID_VOL":/root/.android \
     -e ANDROID_SDK_ROOT=/opt/android-sdk -e GRADLE_USER_HOME=/root/.gradle \
     --user root "$IMAGE" \
     bash -lc './gradlew --no-daemon assembleDebug'

@@ -15,7 +15,10 @@
     "--privileged"
   ],
   "mounts": [
-    "source=cellocoach-gradle,target=/home/vscode/.gradle,type=volume"
+    "source=cellocoach-gradle,target=/home/vscode/.gradle,type=volume",
+    // Persist the debug keystore so rebuilds keep a stable signature
+    // (avoids INSTALL_FAILED_UPDATE_INCOMPATIBLE on adb install -r).
+    "source=cellocoach-android,target=/home/vscode/.android,type=volume"
   ],
   "containerEnv": {
     "ANDROID_SDK_ROOT": "/opt/android-sdk",
