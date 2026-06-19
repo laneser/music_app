@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -57,6 +58,12 @@ fun ScoreView(
     val density = LocalDensity.current
     val scroll = rememberScrollState()
 
+    // Auto-pick the clef from the score's register so the notes land on/near the
+    // staff instead of floating off the top (e.g. a treble-range piano melody on
+    // a bass staff). refMidi is the MIDI of the bottom staff line.
+    val refMidi = remember(notes) { staffReferenceMidi(notes) }
+    val clefGlyph = if (refMidi >= TREBLE_BOTTOM) "𝄞" else "𝄢" // 𝄞 / 𝄢
+
     val noteSpacingPx = with(density) { 52.dp.toPx() }
 
     Box(
@@ -89,13 +96,13 @@ fun ScoreView(
 
             // Fixed layer: staff lines + clef + the centred cursor guide.
             Canvas(modifier = Modifier.fillMaxSize()) {
-                drawStaffAndCursor(status, hasCurrent = currentNoteIdx in notes.indices)
+                drawStaffAndCursor(status, currentNoteIdx in notes.indices, clefGlyph)
             }
 
             // Scrolling layer: the notes themselves.
             Row(modifier = Modifier.fillMaxSize().horizontalScroll(scroll)) {
                 Canvas(modifier = Modifier.width(contentDp).fillMaxHeight()) {
-                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx)
+                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx, refMidi)
                 }
             }
         }
@@ -112,7 +119,7 @@ private fun DrawScope.lineSpacing() = size.height / 13f
 private fun DrawScope.staffTop() = size.height * 0.30f
 
 /** Fixed layer: five staff lines, a pinned clef, and the centre cursor guide. */
-private fun DrawScope.drawStaffAndCursor(status: PitchStatus?, hasCurrent: Boolean) {
+private fun DrawScope.drawStaffAndCursor(status: PitchStatus?, hasCurrent: Boolean, clefGlyph: String) {
     val ls = lineSpacing()
     val top = staffTop()
     val bottom = top + 4f * ls
@@ -125,7 +132,7 @@ private fun DrawScope.drawStaffAndCursor(status: PitchStatus?, hasCurrent: Boole
         val paint = android.graphics.Paint().apply {
             color = Ink.toArgb(); textSize = ls * 4.6f; isAntiAlias = true
         }
-        drawText("𝄢", 8f, top + 3.3f * ls, paint) // 𝄢
+        drawText(clefGlyph, 8f, top + 3.3f * ls, paint)
     }
 
     // Centre cursor — the note being judged is scrolled to here.
@@ -148,14 +155,17 @@ private fun DrawScope.drawNotes(
     status: PitchStatus?,
     leadPx: Float,
     noteSpacing: Float,
+    refMidi: Int,
 ) {
     if (notes.isEmpty()) return
     val ls = lineSpacing()
     val top = staffTop()
     val bottom = top + 4f * ls
+    val refStep = absoluteDiatonicStep(refMidi)
 
     fun xForIdx(i: Int) = leadPx + i * noteSpacing + noteSpacing / 2f
-    fun yForMidi(midi: Int): Float = bottom - diatonicStepsAboveG2(midi) * (ls / 2f)
+    // Bottom staff line = refMidi; each diatonic step is half a line spacing up.
+    fun yForMidi(midi: Int): Float = bottom - (absoluteDiatonicStep(midi) - refStep) * (ls / 2f)
 
     val labelPaint = android.graphics.Paint().apply {
         color = Faint.toArgb(); textSize = ls * 1.5f; isAntiAlias = true
@@ -195,12 +205,28 @@ private fun DrawScope.drawLedgerLines(
     while (y >= cy - half) { drawLine(color, Offset(cx - w, y), Offset(cx + w, y), 1.5f); y -= lineSpacing }
 }
 
-/** Diatonic steps (C,D,E,F,G,A,B count as 1 each) above G2 (MIDI 43). */
-private fun diatonicStepsAboveG2(midi: Int): Int {
+/** Standard treble-clef bottom line = E4 (MIDI 64); bass-clef bottom line = G2 (43). */
+private const val TREBLE_BOTTOM = 64
+private const val BASS_BOTTOM = 43
+
+/** Absolute diatonic step index (C,D,E,F,G,A,B = 1 each), ignoring accidentals. */
+private fun absoluteDiatonicStep(midi: Int): Int {
     val diatonicOfPitchClass = intArrayOf(0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6) // C..B
     val octave = midi / 12 - 1
-    val pc = midi % 12
-    return (octave * 7 + diatonicOfPitchClass[pc]) - (2 * 7 + 4)
+    val pc = ((midi % 12) + 12) % 12
+    return octave * 7 + diatonicOfPitchClass[pc]
+}
+
+/**
+ * Pick the staff's bottom-line MIDI from the score's register: treble (E4) when
+ * the median note is C4 or higher, otherwise bass (G2). Keeps the notes on/near
+ * the staff regardless of whether it's cello-range or an imported treble part.
+ */
+private fun staffReferenceMidi(notes: List<ScoreNote>): Int {
+    val pitches = notes.filter { !it.isRest }.map { it.midi }.sorted()
+    if (pitches.isEmpty()) return BASS_BOTTOM
+    val median = pitches[pitches.size / 2]
+    return if (median >= 60) TREBLE_BOTTOM else BASS_BOTTOM
 }
 
 private fun statusColor(status: PitchStatus?): Color = when (status) {
