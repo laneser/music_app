@@ -13,10 +13,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import android.content.Intent
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.core.content.FileProvider
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cellocoach.core.NoteSummary
@@ -91,6 +95,28 @@ fun ReportScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             items(summary.notes) { note -> NoteRow(note) }
+        }
+
+        val context = LocalContext.current
+        OutlinedButton(
+            onClick = {
+                val file = vm.buildReportFile() ?: return@OutlinedButton
+                val uri = FileProvider.getUriForFile(
+                    context, "${context.packageName}.fileprovider", file,
+                )
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/html"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "大提琴練習報告")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(send, "匯出報告給老師"))
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(TestTags.REPORT_EXPORT),
+        ) {
+            Text("匯出報告 (HTML，給老師)")
         }
 
         Button(

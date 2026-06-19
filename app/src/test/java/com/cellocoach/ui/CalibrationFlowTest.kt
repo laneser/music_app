@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.cellocoach.audio.FakePitchSource
 import com.cellocoach.core.PitchFrame
@@ -83,7 +84,7 @@ class CalibrationFlowTest {
         val vm = launchApp()
 
         // Home -> begin calibration (no saved tuning, so Start routes to Tuning).
-        composeTestRule.onNodeWithTag(TestTags.HOME_START).performClick()
+        composeTestRule.onNodeWithTag(TestTags.HOME_START).performScrollTo().performClick()
         composeTestRule.waitForIdle()
         assertEquals(Screen.TUNING, vm.screen)
         // First target is the lowest string, C.
@@ -116,7 +117,7 @@ class CalibrationFlowTest {
     @Test
     fun `progress bar fills as stable readings accumulate`() {
         val vm = launchApp()
-        composeTestRule.onNodeWithTag(TestTags.HOME_START).performClick()
+        composeTestRule.onNodeWithTag(TestTags.HOME_START).performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
         val hz = nominalHzForString("C").toFloat()
@@ -130,7 +131,7 @@ class CalibrationFlowTest {
     @Test
     fun `silence resets calibration progress`() {
         val vm = launchApp()
-        composeTestRule.onNodeWithTag(TestTags.HOME_START).performClick()
+        composeTestRule.onNodeWithTag(TestTags.HOME_START).performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
         val hz = nominalHzForString("C").toFloat()
@@ -146,7 +147,7 @@ class CalibrationFlowTest {
     @Test
     fun `skip works and goes straight to practice with A=440 reference`() {
         val vm = launchApp()
-        composeTestRule.onNodeWithTag(TestTags.HOME_START).performClick()
+        composeTestRule.onNodeWithTag(TestTags.HOME_START).performScrollTo().performClick()
         composeTestRule.waitForIdle()
         assertEquals(Screen.TUNING, vm.screen)
 

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.cellocoach.audio.FakePitchSource
 import com.cellocoach.core.Clock
@@ -97,7 +98,7 @@ class PracticeFlowTest {
 
     /** From Home, skip calibration and reach a started Practice screen. */
     private fun startPractice(vm: PracticeViewModel) {
-        composeTestRule.onNodeWithTag(TestTags.HOME_START).performClick()
+        composeTestRule.onNodeWithTag(TestTags.HOME_START).performScrollTo().performClick()
         composeTestRule.waitForIdle()
         assertEquals(Screen.TUNING, vm.screen)
         composeTestRule.onNodeWithTag(TestTags.TUNING_SKIP).performClick()

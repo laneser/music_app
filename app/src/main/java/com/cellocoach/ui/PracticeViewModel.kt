@@ -21,10 +21,21 @@ import com.cellocoach.core.Tuning
 import com.cellocoach.core.PracticeSummary
 import com.cellocoach.core.nominalHzForString
 import com.cellocoach.core.pitchStatus
+import com.cellocoach.core.ReportHtml
+import com.cellocoach.audio.Metronome
+import com.cellocoach.data.ScoreLibrary
 import com.cellocoach.data.TuningStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.roundToInt
 
@@ -57,6 +68,7 @@ class PracticeViewModel(
     app: Application,
     private val pitchSource: PitchSource,
     private val tuningStore: TuningStore = TuningStore(app.filesDir),
+    private val scoreLibrary: ScoreLibrary = ScoreLibrary(File(app.filesDir, "scores")),
     /**
      * Clock handed to every [ScoreFollower] this ViewModel builds. Production uses
      * the real [SystemClock]; Robolectric UI tests inject a controllable clock so
@@ -85,13 +97,27 @@ class PracticeViewModel(
         private set
 
     // ---- Score selection ---------------------------------------------------
-    /** Score files bundled under `assets/` (the picker's contents). */
-    val availableScores: List<String> = listAssetScores()
+    /** Bundled assets + user-imported scores (the picker's contents). */
+    var availableScores by mutableStateOf(listAssetScores() + scoreLibrary.list())
+        private set
 
     var selectedScore by mutableStateOf(availableScores.firstOrNull() ?: DEFAULT_SCORE)
         private set
 
     var bpm by mutableStateOf(120.0)
+        private set
+
+    /** Practice tempo multiplier: 1.0 = score tempo, 0.75/0.5 = slower practice. */
+    var tempoFactor by mutableStateOf(1.0)
+        private set
+
+    /** Whether the metronome makes sound (count-in + on-beat). Off by default to
+     *  avoid the speaker click bleeding into the mic — headphones recommended. */
+    var metronomeOn by mutableStateOf(false)
+        private set
+
+    /** Transient status line for import (downloading / done / error). */
+    var importStatus by mutableStateOf<String?>(null)
         private set
 
     private var notes: List<ScoreNote> = emptyList()
@@ -156,7 +182,19 @@ class PracticeViewModel(
 
     private var tickJob: Job? = null
     private var countdownJob: Job? = null
+    private var beatJob: Job? = null
     private var sourceStarted = false
+    private val metronome = Metronome()
+
+    /** Note timeline handed to the engine, stretched for slow practice so the
+     *  follower's time-based fallbacks scale with the chosen tempo. Display
+     *  ([scoreNotes]) stays unscaled — only timing changes. */
+    private fun engineNotes(): List<ScoreNote> =
+        if (tempoFactor >= 0.999) notes
+        else notes.map { it.copy(start = it.start / tempoFactor, end = it.end / tempoFactor) }
+
+    /** Effective metronome beat at the current practice tempo. */
+    private fun beatMs(): Long = (60_000.0 / (bpm * tempoFactor)).toLong().coerceAtLeast(120L)
 
     init {
         loadSavedTuning()
@@ -223,8 +261,18 @@ class PracticeViewModel(
 
     fun goHome() {
         countdownJob?.cancel()
+        beatJob?.cancel()
         screen = Screen.HOME
     }
+
+    /** Set the practice tempo multiplier (e.g. 1.0, 0.75, 0.5). */
+    fun setPracticeTempo(factor: Double) {
+        tempoFactor = factor.coerceIn(0.25, 1.0)
+        resetEngine() // rebuild follower with the rescaled timeline
+    }
+
+    /** Toggle whether the metronome makes sound. */
+    fun toggleMetronome() { metronomeOn = !metronomeOn }
 
     // =======================================================================
     // Source wiring
@@ -262,17 +310,32 @@ class PracticeViewModel(
             refreshPracticeState() // reflect note 0 on the cursor immediately
             return
         }
+        beatJob?.cancel()
         countdownJob = viewModelScope.launch {
-            // 4-beat metronome lead-in at the score's tempo.
-            val beatMs = (60_000.0 / bpm).toLong().coerceAtLeast(100L)
-            for (beat in 4 downTo 1) {
-                countdown = beat
-                delay(beatMs)
+            // 4-beat metronome lead-in at the (possibly slowed) tempo.
+            val beat = beatMs()
+            for (b in 4 downTo 1) {
+                countdown = b
+                if (metronomeOn) { if (b == 4) metronome.accent() else metronome.tick() }
+                delay(beat)
             }
             countdown = 0
             follower?.start()
             started = true
             refreshPracticeState() // reflect note 0 on the cursor immediately
+            if (metronomeOn) startMetronomeBeats()
+        }
+    }
+
+    /** Ongoing on-beat metronome during practice (only while [metronomeOn]). */
+    private fun startMetronomeBeats() {
+        beatJob?.cancel()
+        beatJob = viewModelScope.launch {
+            val beat = beatMs()
+            while (started && !done) {
+                metronome.tick()
+                delay(beat)
+            }
         }
     }
 
@@ -392,9 +455,12 @@ class PracticeViewModel(
     }
 
     private fun loadScore(name: String) {
-        val bytes = runCatching {
-            getApplication<Application>().assets.open(name).use { it.readBytes() }
-        }.getOrNull() ?: return
+        // Imported scores (filesDir/scores) take precedence over bundled assets.
+        val bytes = scoreLibrary.read(name)
+            ?: runCatching {
+                getApplication<Application>().assets.open(name).use { it.readBytes() }
+            }.getOrNull()
+            ?: return
         val loaded = runCatching { ScoreLoader.load(bytes) }.getOrNull() ?: return
         notes = loaded.notes
         bpm = loaded.bpm
@@ -402,8 +468,9 @@ class PracticeViewModel(
     }
 
     private fun resetEngine() {
-        follower = ScoreFollower(notes, clock)
-        scorer = Scorer(notes, tuning)
+        val en = engineNotes()
+        follower = ScoreFollower(en, clock)
+        scorer = Scorer(en, tuning)
         summary = null
         started = false
         done = false
@@ -419,7 +486,70 @@ class PracticeViewModel(
     }
 
     private fun rebuildScorer() {
-        scorer = Scorer(notes, tuning)
+        scorer = Scorer(engineNotes(), tuning)
+    }
+
+    // =======================================================================
+    // Import (file / URL) and export (HTML report)
+    // =======================================================================
+
+    private fun refreshScores() {
+        availableScores = (listAssetScores() + scoreLibrary.list()).distinct()
+    }
+
+    /**
+     * Import a score from raw [bytes] (a picked file or a download). Validates by
+     * parsing, persists to the library, refreshes the picker, and selects it.
+     */
+    fun importScore(displayName: String, bytes: ByteArray) {
+        val parsed = runCatching { ScoreLoader.load(bytes) }.getOrNull()
+        if (parsed == null || parsed.notes.isEmpty()) {
+            importStatus = "匯入失敗：無法解析為樂譜"
+            return
+        }
+        val stored = runCatching { scoreLibrary.save(displayName, bytes) }.getOrNull()
+        if (stored == null) {
+            importStatus = "匯入失敗：無法儲存"
+            return
+        }
+        refreshScores()
+        selectScore(stored)
+        importStatus = "已匯入：$stored（${parsed.notes.size} 音）"
+    }
+
+    /** Download a score from [url] and import it. */
+    fun importFromUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return
+        importStatus = "下載中…"
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = (URL(trimmed).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 10_000; readTimeout = 15_000; instanceFollowRedirects = true
+                    }
+                    try { conn.inputStream.use { it.readBytes() } } finally { conn.disconnect() }
+                }
+            }
+            result.onSuccess { importScore(trimmed, it) }
+                .onFailure { importStatus = "下載失敗：${it.message ?: "未知錯誤"}" }
+        }
+    }
+
+    fun clearImportStatus() { importStatus = null }
+
+    /**
+     * Build the practice report as an HTML file in cache and return it (for the
+     * UI to share via FileProvider). Null if there's no summary yet.
+     */
+    fun buildReportFile(): File? {
+        val s = summary ?: return null
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+        val html = ReportHtml.build(s, selectedScore, stamp)
+        val dir = File(getApplication<Application>().cacheDir, "reports").apply { mkdirs() }
+        val safe = selectedScore.substringBeforeLast('.').replace(Regex("""[^\w\-]"""), "_")
+        val file = File(dir, "report_$safe.html")
+        return runCatching { file.writeText(html); file }.getOrNull()
     }
 
     private fun listAssetScores(): List<String> = runCatching {
@@ -450,6 +580,8 @@ class PracticeViewModel(
         super.onCleared()
         tickJob?.cancel()
         countdownJob?.cancel()
+        beatJob?.cancel()
+        metronome.release()
         if (sourceStarted) pitchSource.stop()
     }
 

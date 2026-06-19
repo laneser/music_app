@@ -25,6 +25,13 @@ object TestTags {
     const val HOME_SCORE_OPTION_PREFIX = "home_score_option_" // + score file name
     const val HOME_TUNING_STATUS = "home_tuning_status"
     const val HOME_CALIBRATE = "home_calibrate"
+    const val HOME_IMPORT_FILE = "home_import_file"
+    const val HOME_IMPORT_URL = "home_import_url"
+    const val HOME_IMPORT_STATUS = "home_import_status"
+    const val HOME_TEMPO = "home_tempo"
+    const val HOME_METRONOME = "home_metronome"
+    const val URL_INPUT = "url_input"
+    const val URL_CONFIRM = "url_confirm"
 
     // ---- Tuning ------------------------------------------------------------
     const val TUNING_TARGET = "tuning_target"
@@ -52,4 +59,5 @@ object TestTags {
     const val REPORT_NOTE_ROW_PREFIX = "report_note_row_" // + note index
     const val REPORT_DIAGNOSTICS = "report_diagnostics"
     const val REPORT_DONE = "report_done"
+    const val REPORT_EXPORT = "report_export"
 }
