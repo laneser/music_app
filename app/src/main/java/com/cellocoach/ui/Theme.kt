@@ -40,11 +40,11 @@ private val DarkColors = darkColorScheme(
  * colour. Mirrors the good/close/off/wrong status from `main.py`.
  */
 object FeedbackColors {
-    val good = Color(0xFF2E7D32)   // green  — within 20¢
-    val close = Color(0xFFF9A825)  // orange — within 50¢
-    val off = Color(0xFFC62828)    // red    — ≥50¢ but correct note
-    val wrong = Color(0xFFC62828)  // red    — wrong note entirely
-    val idle = Color(0xFF9E9E9E)   // grey   — no detection
+    val good = Color(0xFF43A047)   // green       — within 20¢
+    val close = Color(0xFFF9A825)  // amber        — within 50¢
+    val off = Color(0xFFEF6C00)    // deep orange  — ≥50¢ but correct note
+    val wrong = Color(0xFFE53935)  // red          — wrong note entirely
+    val idle = Color(0xFF9E9E9E)   // grey         — no detection
 }
 
 @Composable

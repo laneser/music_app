@@ -423,8 +423,11 @@ class PracticeViewModel(
     }
 
     private fun listAssetScores(): List<String> = runCatching {
+        // Only the unambiguous MusicXML extensions. A bare ".xml" filter also
+        // catches library/framework config assets merged into assets/ (e.g.
+        // attributes_config.xml), which are not scores — so we exclude it.
         getApplication<Application>().assets.list("")
-            ?.filter { it.endsWith(".musicxml") || it.endsWith(".xml") || it.endsWith(".mxl") }
+            ?.filter { it.endsWith(".musicxml", true) || it.endsWith(".mxl", true) }
             ?.sorted()
             ?: emptyList()
     }.getOrDefault(emptyList())

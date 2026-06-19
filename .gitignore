@@ -13,3 +13,7 @@ gradle/wrapper/gradle-wrapper.jar
 
 # OS
 .DS_Store
+
+# local debug screenshots
+cc_*.png
+/*.png

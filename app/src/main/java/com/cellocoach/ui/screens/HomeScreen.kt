@@ -41,9 +41,11 @@ fun HomeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // App name lives in the TopAppBar; here we just guide the next action
+        // (the old duplicate "大提琴練習助手" headline was removed).
         Text(
-            text = "大提琴練習助手",
-            style = MaterialTheme.typography.headlineMedium,
+            text = "選一首曲子開始練習",
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
         )
 

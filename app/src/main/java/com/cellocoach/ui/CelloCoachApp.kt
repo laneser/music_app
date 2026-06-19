@@ -13,8 +13,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import com.cellocoach.ui.screens.HomeScreen
 import com.cellocoach.ui.screens.PracticeScreen
 import com.cellocoach.ui.screens.ReportScreen
@@ -30,11 +33,15 @@ import com.cellocoach.ui.screens.TuningScreen
  * tests inject a [com.cellocoach.audio.FakePitchSource] to drive the flow
  * deterministically.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun CelloCoachApp(vm: PracticeViewModel) {
     CelloCoachTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+        // Expose Compose testTags as resource-ids so uiautomator / instrumented
+        // tooling can target them by id (harmless in production).
+        Surface(modifier = Modifier
+            .fillMaxSize()
+            .semantics { testTagsAsResourceId = true }) {
             Scaffold(
                 topBar = {
                     TopAppBar(
