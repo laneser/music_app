@@ -1,0 +1,15 @@
+# Android / Gradle
+.gradle/
+build/
+/app/build/
+local.properties
+*.iml
+.idea/
+captures/
+.cxx/
+
+# Gradle wrapper jar is generated in the devcontainer (postCreate)
+gradle/wrapper/gradle-wrapper.jar
+
+# OS
+.DS_Store

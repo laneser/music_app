@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple cello-ish glyph: a sound hole + string line, centered in the safe zone. -->
+    <path
+        android:fillColor="#F2C879"
+        android:pathData="M54,28 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:strokeColor="#F2C879"
+        android:strokeWidth="3"
+        android:pathData="M54,34 L54,80" />
+    <path
+        android:fillColor="#F2C879"
+        android:pathData="M44,80 m-9,0 a9,6 0 1,0 18,0 a9,6 0 1,0 -18,0" />
+</vector>

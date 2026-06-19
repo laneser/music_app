@@ -1,0 +1,41 @@
+{
+  "name": "CelloCoach Android",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  // KVM for hardware-accelerated emulator; /dev/bus/usb + privileged so adb can
+  // reach a physical phone forwarded into WSL2 by usbipd-win. See docs/arc42/11_*.
+  "runArgs": [
+    "--device=/dev/kvm",
+    "--device=/dev/bus/usb",
+    "--privileged"
+  ],
+  "mounts": [
+    "source=cellocoach-gradle,target=/home/vscode/.gradle,type=volume"
+  ],
+  "containerEnv": {
+    "ANDROID_SDK_ROOT": "/opt/android-sdk",
+    "ANDROID_HOME": "/opt/android-sdk",
+    // Bridge to an adb server running on the WSL2 host (alternative to raw USB
+    // passthrough): run `adb -a nodaemon server` on the host, then this lets the
+    // container's adb find the phone. Harmless if unused.
+    "ADB_SERVER_SOCKET": "tcp:host.docker.internal:5037"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "fwcd.kotlin",
+        "vscjava.vscode-gradle",
+        "redhat.vscode-xml"
+      ]
+    }
+  },
+  "postCreateCommand": "bash scripts/postcreate.sh",
+  "hostRequirements": {
+    "cpus": 4
+  }
+}
