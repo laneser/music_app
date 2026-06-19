@@ -86,12 +86,28 @@ bash scripts/run-emulator-tests.sh
 
 ## 透過 USB 部署到實機
 
+部署路徑與取捨見 [arc42 §11.3](docs/arc42/11_risks_and_technical_debt.md#113-實機部署路徑wsl2)。
+
+### WSL2（建議）：直接用 Windows adb，免 usbipd
+
+手機插在 Windows、Windows 已有 `adb.exe`（`winget install Google.PlatformTools`），
+WSL2 可直接呼叫它，**不需要把 USB 送進 WSL**：
+
+```bash
+bash scripts/deploy-windows-adb.sh   # build → 複製到 Windows 路徑 → adb.exe install → 啟動
+```
+
+手機需開「USB 偵錯」並在彈窗點「允許」（`adb.exe devices` 顯示 `unauthorized` 時，
+腳本會等你授權）。詳見 [`scripts/deploy-windows-adb.sh`](scripts/deploy-windows-adb.sh)。
+
+### 容器內 Linux adb（usbipd-win 把 USB 送進 WSL）
+
 ```bash
 bash scripts/deploy-usb.sh
 ```
 
 此腳本（[`scripts/deploy-usb.sh`](scripts/deploy-usb.sh)）會
-`assembleDebug` → `adb install -r` → 啟動 App。
+`assembleDebug` → `adb install -r` → 啟動 App，需先把 USB 轉進 WSL。
 
 WSL2 + Windows 前置步驟：
 
