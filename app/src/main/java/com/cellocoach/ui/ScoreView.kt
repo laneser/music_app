@@ -6,7 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -32,23 +34,18 @@ import kotlin.math.roundToInt
  * Native Compose notation view — the in-app replacement for the browser's
  * OpenSheetMusicDisplay (OSMD).
  *
- * Design notes (v2):
- *  - Draws on its own **cream "paper" surface** with a rounded border, so the
- *    staff and noteheads stay legible regardless of the app's light/dark theme
- *    (the previous version drew near-black ink that vanished in dark mode).
- *  - Lays notes out at a **fixed horizontal spacing** and lets the staff scroll
- *    horizontally, instead of compressing the whole piece into one screen width
- *    (which crammed longer scores like `twinkle.mxl` into an unreadable blob).
- *  - **Auto-follows the cursor**: the current note is animated to the centre of
- *    the viewport, mirroring how the OSMD cursor kept the played note in view.
- *  - A small note-name label under each head helps the student read position.
+ * Design (v3 — "teleprompter"):
+ *  - The **staff and bass clef are fixed**; the **notes scroll** underneath, so
+ *    the current note stays pinned to the centre of the view and the music
+ *    flows past it (instead of the cursor crawling to the right edge).
+ *  - Half-a-viewport of blank lead/trail padding lets even the first and last
+ *    notes reach the centre.
+ *  - Cream "paper" surface so the ink is legible in light *and* dark themes.
+ *  - A note-name label under each head; the current note + its label are tinted
+ *    by [status] (green/amber/orange/red for good/close/off/wrong).
  *
- * Vertical mapping uses bass-clef staff steps: the bottom staff line is G2
- * (MIDI 43, the open G string); each diatonic step is half a line spacing.
- *
- * @param notes flattened timeline from [com.cellocoach.core.ScoreLoader].
- * @param currentNoteIdx index of the note the follower says is current (-1 = none).
- * @param status realtime [PitchStatus] of the current note, or null when idle.
+ * Vertical mapping: bottom staff line = G2 (MIDI 43, open G string); each
+ * diatonic step is half a line spacing.
  */
 @Composable
 fun ScoreView(
@@ -60,9 +57,7 @@ fun ScoreView(
     val density = LocalDensity.current
     val scroll = rememberScrollState()
 
-    val noteSpacingPx = with(density) { 48.dp.toPx() }
-    val leftPadPx = with(density) { 56.dp.toPx() }
-    val rightPadPx = with(density) { 28.dp.toPx() }
+    val noteSpacingPx = with(density) { 52.dp.toPx() }
 
     Box(
         modifier = modifier
@@ -73,28 +68,35 @@ fun ScoreView(
             .border(1.dp, PaperBorder, RoundedCornerShape(14.dp))
             .testTag(TestTags.PRACTICE_SCORE_VIEW),
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
-            val viewportPx = with(density) { maxWidth.toPx() }
-            val contentPx = (leftPadPx + notes.size * noteSpacingPx + rightPadPx)
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val viewportPx = constraints.maxWidth.toFloat()
+            // Blank padding so the first/last note can still sit in the centre.
+            val leadPx = viewportPx / 2f
+            val trailPx = viewportPx / 2f
+            fun noteX(i: Int) = leadPx + i * noteSpacingPx + noteSpacingPx / 2f
+
+            val contentPx = (leadPx + notes.size * noteSpacingPx + trailPx)
                 .coerceAtLeast(viewportPx)
             val contentDp = with(density) { contentPx.toDp() }
 
-            // Animate the current note to the centre of the viewport.
+            // Keep the current note centred: scroll so its x lands at viewport/2.
             LaunchedEffect(currentNoteIdx, viewportPx, notes.size) {
                 if (currentNoteIdx in notes.indices) {
-                    val cx = leftPadPx + currentNoteIdx * noteSpacingPx + noteSpacingPx / 2f
-                    val target = (cx - viewportPx / 2f).roundToInt().coerceAtLeast(0)
-                    scroll.animateScrollTo(target.coerceAtMost(scroll.maxValue))
+                    val target = (noteX(currentNoteIdx) - viewportPx / 2f).roundToInt()
+                    scroll.animateScrollTo(target.coerceIn(0, scroll.maxValue))
                 }
             }
 
-            Canvas(
-                modifier = Modifier
-                    .width(contentDp)
-                    .fillMaxHeight()
-                    .horizontalScroll(scroll),
-            ) {
-                drawScore(notes, currentNoteIdx, status, leftPadPx, noteSpacingPx)
+            // Fixed layer: staff lines + clef + the centred cursor guide.
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawStaffAndCursor(status, hasCurrent = currentNoteIdx in notes.indices)
+            }
+
+            // Scrolling layer: the notes themselves.
+            Row(modifier = Modifier.fillMaxSize().horizontalScroll(scroll)) {
+                Canvas(modifier = Modifier.width(contentDp).fillMaxHeight()) {
+                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx)
+                }
             }
         }
     }
@@ -105,89 +107,79 @@ private val PaperBorder = Color(0x33000000)
 private val Ink = Color(0xFF2A2622)          // staff + idle noteheads
 private val Faint = Color(0xFF8A8377)         // labels / ledger lines
 
-private fun DrawScope.drawScore(
-    notes: List<ScoreNote>,
-    currentNoteIdx: Int,
-    status: PitchStatus?,
-    leftPad: Float,
-    noteSpacing: Float,
-) {
-    // Staff occupies the middle band, leaving room for ledger lines + labels.
-    val lineSpacing = (size.height / 13f)
-    val staffTop = size.height * 0.30f
-    val bottomLine = staffTop + 4f * lineSpacing
-    val contentRight = size.width
+/** Geometry shared by both layers so notes line up with the fixed staff. */
+private fun DrawScope.lineSpacing() = size.height / 13f
+private fun DrawScope.staffTop() = size.height * 0.30f
 
-    // --- five staff lines (span the whole scrollable width) ---
+/** Fixed layer: five staff lines, a pinned clef, and the centre cursor guide. */
+private fun DrawScope.drawStaffAndCursor(status: PitchStatus?, hasCurrent: Boolean) {
+    val ls = lineSpacing()
+    val top = staffTop()
+    val bottom = top + 4f * ls
+
     for (i in 0 until 5) {
-        val y = staffTop + i * lineSpacing
-        drawLine(Ink, Offset(leftPad - 8f, y), Offset(contentRight - 8f, y), strokeWidth = 1.5f)
+        val y = top + i * ls
+        drawLine(Ink, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.5f)
     }
-
-    // --- bass-clef glyph ---
     drawContext.canvas.nativeCanvas.apply {
         val paint = android.graphics.Paint().apply {
-            color = Ink.toArgb()
-            textSize = lineSpacing * 4.6f
-            isAntiAlias = true
+            color = Ink.toArgb(); textSize = ls * 4.6f; isAntiAlias = true
         }
-        drawText("𝄢", 6f, staffTop + 3.3f * lineSpacing, paint) // 𝄢
+        drawText("𝄢", 8f, top + 3.3f * ls, paint) // 𝄢
     }
 
-    if (notes.isEmpty()) return
-
-    fun xForIdx(idx: Int) = leftPad + idx * noteSpacing + noteSpacing / 2f
-    fun yForMidi(midi: Int): Float {
-        val step = diatonicStepsAboveG2(midi)
-        return bottomLine - step * (lineSpacing / 2f)
-    }
-
-    // --- cursor highlight band (drawn first, behind the note) ---
-    if (currentNoteIdx in notes.indices) {
-        val cx = xForIdx(currentNoteIdx)
+    // Centre cursor — the note being judged is scrolled to here.
+    if (hasCurrent) {
+        val cx = size.width / 2f
         val c = statusColor(status)
         drawRect(
             color = c.copy(alpha = 0.16f),
-            topLeft = Offset(cx - noteSpacing * 0.42f, staffTop - lineSpacing * 1.6f),
-            size = Size(noteSpacing * 0.84f, lineSpacing * 8f),
+            topLeft = Offset(cx - ls * 1.3f, top - ls * 1.6f),
+            size = Size(ls * 2.6f, ls * 8f),
         )
-        drawLine(c, Offset(cx, staffTop - lineSpacing * 1.6f),
-            Offset(cx, bottomLine + lineSpacing * 2.4f), strokeWidth = 2.5f)
+        drawLine(c, Offset(cx, top - ls * 1.6f), Offset(cx, bottom + ls * 2.4f), strokeWidth = 2.5f)
     }
+}
+
+/** Scrolling layer: noteheads, stems, ledger lines, and note-name labels. */
+private fun DrawScope.drawNotes(
+    notes: List<ScoreNote>,
+    currentNoteIdx: Int,
+    status: PitchStatus?,
+    leadPx: Float,
+    noteSpacing: Float,
+) {
+    if (notes.isEmpty()) return
+    val ls = lineSpacing()
+    val top = staffTop()
+    val bottom = top + 4f * ls
+
+    fun xForIdx(i: Int) = leadPx + i * noteSpacing + noteSpacing / 2f
+    fun yForMidi(midi: Int): Float = bottom - diatonicStepsAboveG2(midi) * (ls / 2f)
 
     val labelPaint = android.graphics.Paint().apply {
-        color = Faint.toArgb()
-        textSize = lineSpacing * 1.5f
-        isAntiAlias = true
+        color = Faint.toArgb(); textSize = ls * 1.5f; isAntiAlias = true
         textAlign = android.graphics.Paint.Align.CENTER
     }
-    val labelPaintCurrent = android.graphics.Paint(labelPaint).apply {
-        color = statusColor(status).toArgb()
-        isFakeBoldText = true
+    val labelCurrent = android.graphics.Paint(labelPaint).apply {
+        color = statusColor(status).toArgb(); isFakeBoldText = true
     }
 
     notes.forEachIndexed { idx, note ->
         val cx = xForIdx(idx)
         val isCurrent = idx == currentNoteIdx
         if (note.isRest) {
-            drawLine(Faint, Offset(cx, staffTop + 1.4f * lineSpacing),
-                Offset(cx, staffTop + 2.6f * lineSpacing), strokeWidth = 3f)
+            drawLine(Faint, Offset(cx, top + 1.4f * ls), Offset(cx, top + 2.6f * ls), strokeWidth = 3f)
             return@forEachIndexed
         }
-
         val cy = yForMidi(note.midi)
         val head = if (isCurrent) statusColor(status) else Ink
-        val radius = lineSpacing * 0.58f
-
-        drawLedgerLines(cx, cy, staffTop, bottomLine, lineSpacing, Faint)
+        val radius = ls * 0.58f
+        drawLedgerLines(cx, cy, top, bottom, ls, Faint)
         drawCircle(head, radius, Offset(cx, cy))
-        drawLine(head, Offset(cx + radius * 0.9f, cy),
-            Offset(cx + radius * 0.9f, cy - lineSpacing * 3.2f), strokeWidth = 2.2f)
-
-        // note-name label under the staff
+        drawLine(head, Offset(cx + radius * 0.9f, cy), Offset(cx + radius * 0.9f, cy - ls * 3.2f), strokeWidth = 2.2f)
         drawContext.canvas.nativeCanvas.drawText(
-            note.name, cx, bottomLine + lineSpacing * 2.6f,
-            if (isCurrent) labelPaintCurrent else labelPaint,
+            note.name, cx, bottom + ls * 2.6f, if (isCurrent) labelCurrent else labelPaint,
         )
     }
 }
@@ -208,9 +200,7 @@ private fun diatonicStepsAboveG2(midi: Int): Int {
     val diatonicOfPitchClass = intArrayOf(0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6) // C..B
     val octave = midi / 12 - 1
     val pc = midi % 12
-    val absoluteStep = octave * 7 + diatonicOfPitchClass[pc]
-    val g2Step = 2 * 7 + 4
-    return absoluteStep - g2Step
+    return (octave * 7 + diatonicOfPitchClass[pc]) - (2 * 7 + 4)
 }
 
 private fun statusColor(status: PitchStatus?): Color = when (status) {
