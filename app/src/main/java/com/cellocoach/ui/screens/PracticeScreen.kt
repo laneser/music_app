@@ -53,6 +53,7 @@ fun PracticeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
                 notes = vm.scoreNotes,
                 currentNoteIdx = vm.currentNoteIdx,
                 status = vm.status,
+                bpm = vm.bpm,
             )
 
             FeedbackPanel(vm)

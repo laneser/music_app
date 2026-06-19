@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -53,6 +54,7 @@ fun ScoreView(
     notes: List<ScoreNote>,
     currentNoteIdx: Int,
     status: PitchStatus?,
+    bpm: Double,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -102,7 +104,7 @@ fun ScoreView(
             // Scrolling layer: the notes themselves.
             Row(modifier = Modifier.fillMaxSize().horizontalScroll(scroll)) {
                 Canvas(modifier = Modifier.width(contentDp).fillMaxHeight()) {
-                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx, refMidi)
+                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx, refMidi, bpm)
                 }
             }
         }
@@ -156,12 +158,14 @@ private fun DrawScope.drawNotes(
     leadPx: Float,
     noteSpacing: Float,
     refMidi: Int,
+    bpm: Double,
 ) {
     if (notes.isEmpty()) return
     val ls = lineSpacing()
     val top = staffTop()
     val bottom = top + 4f * ls
     val refStep = absoluteDiatonicStep(refMidi)
+    val secPerQuarter = 60.0 / bpm.coerceAtLeast(1.0)
 
     fun xForIdx(i: Int) = leadPx + i * noteSpacing + noteSpacing / 2f
     // Bottom staff line = refMidi; each diatonic step is half a line spacing up.
@@ -178,20 +182,75 @@ private fun DrawScope.drawNotes(
     notes.forEachIndexed { idx, note ->
         val cx = xForIdx(idx)
         val isCurrent = idx == currentNoteIdx
+        val ql = (note.end - note.start) / secPerQuarter      // length in quarter notes
+        val shape = classifyDuration(ql)
+        val ink = if (isCurrent) statusColor(status) else Ink
         if (note.isRest) {
-            drawLine(Faint, Offset(cx, top + 1.4f * ls), Offset(cx, top + 2.6f * ls), strokeWidth = 3f)
+            drawRest(cx, top, ls, shape, Faint)
             return@forEachIndexed
         }
         val cy = yForMidi(note.midi)
-        val head = if (isCurrent) statusColor(status) else Ink
-        val radius = ls * 0.58f
         drawLedgerLines(cx, cy, top, bottom, ls, Faint)
-        drawCircle(head, radius, Offset(cx, cy))
-        drawLine(head, Offset(cx + radius * 0.9f, cy), Offset(cx + radius * 0.9f, cy - ls * 3.2f), strokeWidth = 2.2f)
+        drawNoteGlyph(cx, cy, ink, ls, shape)
         drawContext.canvas.nativeCanvas.drawText(
             note.name, cx, bottom + ls * 2.6f, if (isCurrent) labelCurrent else labelPaint,
         )
     }
+}
+
+/** Notehead/stem/flags/dot for one note value. */
+private data class NoteShape(val filled: Boolean, val stem: Boolean, val flags: Int, val dotted: Boolean)
+
+/** Classify a quarter-length into the nearest standard note value (log distance). */
+private fun classifyDuration(ql: Double): NoteShape {
+    val templates = listOf(
+        4.0 to NoteShape(filled = false, stem = false, flags = 0, dotted = false), // whole
+        3.0 to NoteShape(filled = false, stem = true, flags = 0, dotted = true),   // dotted half
+        2.0 to NoteShape(filled = false, stem = true, flags = 0, dotted = false),  // half
+        1.5 to NoteShape(filled = true, stem = true, flags = 0, dotted = true),    // dotted quarter
+        1.0 to NoteShape(filled = true, stem = true, flags = 0, dotted = false),   // quarter
+        0.75 to NoteShape(filled = true, stem = true, flags = 1, dotted = true),   // dotted eighth
+        0.5 to NoteShape(filled = true, stem = true, flags = 1, dotted = false),   // eighth
+        0.375 to NoteShape(filled = true, stem = true, flags = 2, dotted = true),  // dotted 16th
+        0.25 to NoteShape(filled = true, stem = true, flags = 2, dotted = false),  // sixteenth
+    )
+    val q = ql.coerceAtLeast(0.0625)
+    return templates.minByOrNull { kotlin.math.abs(kotlin.math.ln(q / it.first)) }!!.second
+}
+
+private fun DrawScope.drawNoteGlyph(cx: Float, cy: Float, color: Color, ls: Float, shape: NoteShape) {
+    val rx = ls * 0.62f
+    val ry = ls * 0.5f
+    if (shape.filled) {
+        drawOval(color, topLeft = Offset(cx - rx, cy - ry), size = Size(rx * 2, ry * 2))
+    } else {
+        drawOval(color, topLeft = Offset(cx - rx, cy - ry), size = Size(rx * 2, ry * 2),
+            style = Stroke(width = ls * 0.18f))
+    }
+    if (shape.dotted) drawCircle(color, ls * 0.16f, Offset(cx + rx + ls * 0.45f, cy))
+    if (shape.stem) {
+        val stemX = cx + rx * 0.92f
+        val stemTop = cy - ls * 3.2f
+        drawLine(color, Offset(stemX, cy), Offset(stemX, stemTop), strokeWidth = ls * 0.16f)
+        for (k in 0 until shape.flags) {
+            val fy = stemTop + k * ls * 0.7f
+            drawLine(color, Offset(stemX, fy), Offset(stemX + ls * 0.9f, fy + ls * 0.95f),
+                strokeWidth = ls * 0.16f)
+        }
+    }
+}
+
+/** A simple duration-aware rest mark. */
+private fun DrawScope.drawRest(cx: Float, top: Float, ls: Float, shape: NoteShape, color: Color) {
+    val midY = top + 2f * ls
+    if (!shape.filled && !shape.stem) {
+        // whole rest — hanging block under the 2nd line from top
+        drawRect(color, topLeft = Offset(cx - ls * 0.5f, top + ls - ls * 0.25f), size = Size(ls, ls * 0.25f))
+    } else {
+        // generic rest: a short zigzag-ish bar centred on the middle line
+        drawRect(color, topLeft = Offset(cx - ls * 0.18f, midY - ls * 0.8f), size = Size(ls * 0.36f, ls * 1.6f))
+    }
+    if (shape.dotted) drawCircle(color, ls * 0.16f, Offset(cx + ls * 0.6f, midY))
 }
 
 private fun DrawScope.drawLedgerLines(
