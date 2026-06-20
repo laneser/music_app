@@ -199,4 +199,54 @@ class ScoreFollowerTest {
         clock.seconds = 3.25
         assertEquals(3.25, follower.elapsed(), 1e-9)
     }
+
+    // ---- wait-for-correct mode ------------------------------------------------
+
+    @Test
+    fun waitMode_parksUntilCorrectThenAdvances() {
+        val clock = FakeClock()
+        val follower = ScoreFollower(
+            listOf(note(0.0, 60), note(1.0, 62)),
+            clock,
+            waitForCorrect = true,
+        )
+        follower.start()
+
+        // Wrong notes and silence never advance, no matter how much time passes.
+        repeat(20) { follower.observe(64) }
+        clock.seconds = 100.0
+        repeat(20) { follower.observe(null) }
+        assertEquals("must stay until played correctly", 0, follower.currentNoteIdx())
+
+        // Correct pitch held for the threshold advances exactly one note.
+        repeat(ScoreFollower.ADVANCE_THRESHOLD_TICKS) { follower.observe(60) }
+        assertEquals(1, follower.currentNoteIdx())
+    }
+
+    @Test
+    fun waitMode_resetsHeldCountOnWrongNote() {
+        val clock = FakeClock()
+        val follower = ScoreFollower(listOf(note(0.0, 60), note(1.0, 62)), clock, waitForCorrect = true)
+        follower.start()
+        repeat(ScoreFollower.ADVANCE_THRESHOLD_TICKS - 1) { follower.observe(60) }
+        follower.observe(99) // wrong note resets the streak
+        repeat(ScoreFollower.ADVANCE_THRESHOLD_TICKS - 1) { follower.observe(60) }
+        assertEquals(0, follower.currentNoteIdx())
+    }
+
+    @Test
+    fun waitMode_restAdvancesByTime() {
+        val clock = FakeClock()
+        val follower = ScoreFollower(
+            listOf(note(0.0, ScoreNote.REST, len = 1.0), note(1.0, 60)),
+            clock,
+            waitForCorrect = true,
+        )
+        follower.start()
+        follower.observe(null)
+        assertEquals(0, follower.currentNoteIdx())
+        clock.seconds = 1.1
+        follower.observe(null)
+        assertEquals("rest advances by its duration even in wait mode", 1, follower.currentNoteIdx())
+    }
 }

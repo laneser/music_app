@@ -116,19 +116,33 @@ fun HomeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        // ---- Tempo (slow practice) ----
+        // ---- Practice speed / mode ----
         Text("練習速度", style = MaterialTheme.typography.titleSmall)
         Row(
             modifier = Modifier.testTag(TestTags.HOME_TEMPO),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf(1.0 to "原速", 0.75 to "75%", 0.5 to "50%").forEach { (f, label) ->
-                if (vm.tempoFactor == f) {
-                    Button(onClick = { vm.setPracticeTempo(f) }) { Text(label) }
+            // (label, waitMode, tempoFactor)
+            val options = listOf(
+                Triple("原速", false, 1.0),
+                Triple("75%", false, 0.75),
+                Triple("50%", false, 0.5),
+                Triple("等正確", true, 1.0),
+            )
+            options.forEach { (label, wait, f) ->
+                val selected = if (wait) vm.waitMode else (!vm.waitMode && vm.tempoFactor == f)
+                if (selected) {
+                    Button(onClick = { vm.setPracticeMode(wait, f) }) { Text(label) }
                 } else {
-                    OutlinedButton(onClick = { vm.setPracticeTempo(f) }) { Text(label) }
+                    OutlinedButton(onClick = { vm.setPracticeMode(wait, f) }) { Text(label) }
                 }
             }
+        }
+        if (vm.waitMode) {
+            Text(
+                "等正確：拉對目前這顆音才會前進，適合逐句慢練。",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
 
         // ---- Metronome toggle ----
