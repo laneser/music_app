@@ -111,6 +111,11 @@ class PracticeViewModel(
     var tempoFactor by mutableStateOf(1.0)
         private set
 
+    /** "Wait until correct" mode — the cursor only advances once you play each
+     *  note right (no timeout). Orthogonal to [tempoFactor]. */
+    var waitMode by mutableStateOf(false)
+        private set
+
     /** Whether the metronome makes sound (count-in + on-beat). Off by default to
      *  avoid the speaker click bleeding into the mic — headphones recommended. */
     var metronomeOn by mutableStateOf(false)
@@ -271,6 +276,16 @@ class PracticeViewModel(
         resetEngine() // rebuild follower with the rescaled timeline
     }
 
+    /**
+     * Choose a practice mode: either a tempo multiplier (wait=false) or the
+     * wait-until-correct drill (wait=true). Rebuilds the follower.
+     */
+    fun setPracticeMode(wait: Boolean, factor: Double = 1.0) {
+        waitMode = wait
+        tempoFactor = factor.coerceIn(0.25, 1.0)
+        resetEngine()
+    }
+
     /** Toggle whether the metronome makes sound. */
     fun toggleMetronome() { metronomeOn = !metronomeOn }
 
@@ -323,7 +338,9 @@ class PracticeViewModel(
             follower?.start()
             started = true
             refreshPracticeState() // reflect note 0 on the cursor immediately
-            if (metronomeOn) startMetronomeBeats()
+            // On-beat metronome only makes sense at a steady tempo, not in the
+            // self-paced wait-for-correct drill.
+            if (metronomeOn && !waitMode) startMetronomeBeats()
         }
     }
 
@@ -469,7 +486,7 @@ class PracticeViewModel(
 
     private fun resetEngine() {
         val en = engineNotes()
-        follower = ScoreFollower(en, clock)
+        follower = ScoreFollower(en, clock, waitForCorrect = waitMode)
         scorer = Scorer(en, tuning)
         summary = null
         started = false

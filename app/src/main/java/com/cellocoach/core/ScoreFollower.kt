@@ -27,6 +27,14 @@ package com.cellocoach.core
 class ScoreFollower(
     private val notes: List<ScoreNote>,
     private val clock: Clock = SystemClock,
+    /**
+     * "Wait until correct" practice mode. When true, the follower never advances
+     * on a timeout or look-ahead — it parks on the current note until that note's
+     * own pitch is played correctly for [ADVANCE_THRESHOLD_TICKS] ticks, then
+     * steps to the next. Rests still advance by time (they can't be played).
+     * Lets a student drill a passage note-by-note at their own pace.
+     */
+    private val waitForCorrect: Boolean = false,
 ) {
     private var idx: Int = -1                 // current note index; -1 = not started
     private var globalStart: Double? = null
@@ -34,6 +42,8 @@ class ScoreFollower(
     // Hysteresis state for an upcoming-note match in progress.
     private var candidateTarget: Int? = null
     private var candidateCount: Int = 0
+    // Consecutive correct ticks on the current note (wait-for-correct mode).
+    private var correctHeld: Int = 0
 
     /** Wall-clock seconds from the injected clock (Python `time.monotonic()`). */
     private fun now(): Double = clock.nowNanos() / 1e9
@@ -46,6 +56,7 @@ class ScoreFollower(
         dwellStart = now
         candidateTarget = null
         candidateCount = 0
+        correctHeld = 0
     }
 
     fun started(): Boolean = globalStart != null
@@ -72,6 +83,7 @@ class ScoreFollower(
      */
     fun observe(detectedMidi: Int?) {
         if (!started() || isDone()) return
+        if (waitForCorrect) { observeWait(detectedMidi); return }
 
         val now = now()
         val dwell = now - (dwellStart ?: now)
@@ -154,11 +166,33 @@ class ScoreFollower(
         }
     }
 
+    /**
+     * Wait-for-correct advance: park until the current note's own pitch is held
+     * correctly for [ADVANCE_THRESHOLD_TICKS] ticks. No timeout, no look-ahead —
+     * the student must actually play the note. Rests advance by their time.
+     */
+    private fun observeWait(detectedMidi: Int?) {
+        val now = now()
+        val current = notes[idx]
+        if (current.midi < 0) {
+            val dwell = now - (dwellStart ?: now)
+            if (dwell >= maxOf(current.end - current.start, 0.05)) advance(now)
+            return
+        }
+        if (detectedMidi == current.midi) {
+            correctHeld += 1
+            if (correctHeld >= ADVANCE_THRESHOLD_TICKS) advance(now)
+        } else {
+            correctHeld = 0
+        }
+    }
+
     private fun advance(now: Double) {
         idx += 1
         dwellStart = now
         candidateTarget = null
         candidateCount = 0
+        correctHeld = 0
     }
 
     companion object {
